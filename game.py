@@ -1,30 +1,27 @@
 import numpy as np
-import random
-import pandas as pd
-import os.path
-import struct
-import h5py
-from bisect import bisect_left
-import re
 
 class Agent:
-    def __init__(self, strategy, index,prob):
-        """
-        Each agent has a strategy type (0,F)
-        And starting fitness as per position
-        """
+    """
+    This class defines the agent that 
+    participates in the purgatory game.
+    Each agent has a strategy type (0,F)
+    """
+    def __init__(self, strategy, index,args):
         self.strategy = strategy
         self.payment = strategy
-        self.payoff=0
         self.flag=False
         self.time=0
         self.index=index
         self.history=[index]
-        self.prob=prob
+        if args.ignorance_distribution == 1:
+            self.prob=np.random.uniform(args.p_min, 1)
+        elif args.ignorance_distribution == 2:
+            self.prob=args.prob
+        elif args.ignorance_distribution == 3:
+            self.prob=np.random.beta(args.a, args.b)
     def mutate(self,trend,fine):
         """
-        Allow a small chance of mutation to flip strategy
-        Otherwise, return offspring of the same type
+        Change of strategy based on trend.
         """
         if trend:
             if self.strategy < fine:
@@ -34,25 +31,34 @@ class Agent:
                 self.strategy-=1
                       
 class Game:
-    def __init__(self, n,F,Q, T, K,prob):
+    '''
+    This class stores and updates the 
+    queue on which the purgatory game 
+    is played.
+    '''
+    def __init__(self, args):
         Agents=[]
+        n=args.n    
         for i in range(n):
-            Agents.append(Agent(0,i,prob))
-            Heads= random.randint(1,1000) > Agents[i].prob
+            Agents.append(Agent(0,i,args))
+            Heads= np.random.uniform(0, 1) > Agents[i].prob
             if Heads:
                 Agents[i].payment+=1
                 Agents[i].strategy+=1
         self.agents=Agents
-        self.timelimit=T
+        self.timelimit=args.T
         self.time=0
-        self.pay=K
-        self.prob=prob
-        self.fine=F
-        self.Q=Q
+        self.pay=args.K
+        self.prob=args.ignorance_distribution
+        self.fine=args.F
+        self.Q=args.Q
         self.collected=0
+        self.x_mean=args.x_mean
+        self.x_std=args.x_std
+        self.args = args
     def sort(self):
         """
-        Sort by payment
+        Sort by ratio of payment and time spent. 
         """
         c=self.timelimit/10
         for agent in self.agents:
@@ -71,18 +77,22 @@ class Game:
             return (agent.history[t-10]-agent.history[t])*(T-t)/10.0 > pos
         else:
             return (agent.history[0]-agent.history[t])*(T-t)/t > pos                                                #agent likely to have to pay
-    def payment(self):
-        sum = 0
-        for agent in self.agents:
-            sum+=agent.payment
-        return sum
     def run(self):
-        #act=random.randint(0,1000)>100
+        '''
+        Run a single iteration of the game.
+        First K agents are sent to hell 
+        and forced to pay Q.
+        Each agent pays his strategy
+        with probability (1-probability of ignorance)
+        Players ho have paid F or 
+        spent T iterations are sent to heaven.
+        The queue is sorted and new agents enter.
+        '''
         F=self.fine
         Q=self.Q
         out=[]
         for agent in self.agents:
-            act=random.randint(0,1000) > agent.prob                            #probability with which agent checks the system and chooses to play
+            act=np.random.uniform(0, 1) > agent.prob                            #probability with which agent checks the system and chooses to play
             if agent.index < self.pay:
                 agent.flag=True                                        #first K agents marked for removal
                 if agent.payment < F:
@@ -110,12 +120,14 @@ class Game:
                    agent.mutate(trend,F)
         
         
-        n0=int(np.random.normal(100,15))
+        n0=int(np.random.normal(self.x_mean,self.x_std))
+        if n0 < 0:
+            raise ValueError('Number of people entering the queue cannot be negative. Check the values of x_mean and x_std')
         for _ in range(n0):
             l=len(self.agents)
             prob=self.prob
-            self.agents.append(Agent(0,l,prob))
-            Heads= random.randint(1,1000) > self.agents[l].prob
+            self.agents.append(Agent(0,l,self.args))
+            Heads= np.random.uniform(0, 1) > self.agents[l].prob
             if Heads:
                 self.agents[l].payment+=1
                 self.agents[l].strategy+=1
